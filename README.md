@@ -90,6 +90,7 @@ Deliberate simplifications, documented in `docs/method.md`: LLR and path
 metrics replace the paper's likelihood domain, paths are full-vector copies
 instead of the lazy-copy structure of Algs 8-13 (so SCL costs O(L*n^2), not
 O(L*n log n)), and final CRC selection follows Niu-Chen rather than Tal-Vardy.
+Terms from the papers and the code are defined in `GLOSSARY.md`.
 
 ## Key implementation detail
 

@@ -9,6 +9,14 @@ from .scl import scl_decode, ca_scl_decode
 
 def run_point(N, K, frozen, snr_db, decoder="sc", L=8, n_blocks=200,
               crc_len=0, seed=0):
+    """One curve point: (BER, FER) for a decoder at one Eb/N0.
+
+    Draws n_blocks uniform messages with a seeded RNG (same seed replays
+    the same point), encodes, adds AWGN at rate K/N, decodes, and counts
+    bit errors over message bits plus block errors. With crc_len=16 the
+    message shrinks to K-16 and the CRC fills the rest, matching what
+    ca_scl_decode expects. E.g. run_point(128, 64, fz, 3.0, "scl", L=4).
+    """
     rng = np.random.default_rng(seed)
     info_idx = np.where(~frozen)[0]
     assert len(info_idx) == K

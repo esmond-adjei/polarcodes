@@ -8,11 +8,25 @@ from .crc import check_crc
 
 
 def _update_pm(pm: float, L: float, u: int) -> float:
+    """Add bit u's penalty to path metric pm given its LLR L.
+
+    Penalty = log(1 + exp(-(1-2u)L)): ~0 when u agrees with L's sign,
+    ~|L| when it contradicts it. So pm is the total log-likelihood cost
+    of the path's decisions, and ranking by pm ranks by likelihood.
+    Frozen bits still pay the u=0 penalty, which keeps paths comparable.
+    """
     return pm + float(np.log1p(np.exp(-(1 - 2 * int(u)) * L)))
 
 
 def scl_decode(llr: np.ndarray, frozen: np.ndarray, L: int) -> list[np.ndarray]:
-    """Return up to L candidate u_hat vectors (best first)."""
+    """List-decode to the L most likely u vectors, best first.
+
+    Follows Tal-Vardy Algs 16-18: each info bit forks every survivor in
+    two (frozen bits extend without forking), all forks are ranked by
+    path metric, and only the L best continue. L=1 reduces to SC. The
+    full-vector copy per fork is the O(L n^2) bottleneck the paper's
+    lazy-copy structure (Algs 8-13) removes.
+    """
     paths = [{"u": np.zeros(len(llr), dtype=np.uint8), "pm": 0.0}]
     for i in range(len(llr)):
         cands = []
@@ -35,7 +49,14 @@ def scl_decode(llr: np.ndarray, frozen: np.ndarray, L: int) -> list[np.ndarray]:
 
 def ca_scl_decode(llr: np.ndarray, frozen: np.ndarray, info_idx: np.ndarray,
                   L: int) -> np.ndarray:
-    """Pick best CRC-passing path; fall back to best path."""
+    """Return the best list path whose info bits pass the CRC.
+
+    Why: the ML path is usually somewhere in the list but not ranked
+    first, and the CRC identifies it. Falls back to the best path when
+    nothing passes (all-wrong list), so behavior degrades to plain SCL
+    instead of crashing. info_idx must match the layout sim.py used when
+    appending the CRC, or every check fails and you silently get SCL.
+    """
     for c in scl_decode(llr, frozen, L):
         if check_crc(c[info_idx]):
             return c
