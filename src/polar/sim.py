@@ -21,7 +21,7 @@ def run_point(N, K, frozen, snr_db, decoder="sc", L=8, n_blocks=200,
             msg = append_crc(msg)
         u = np.zeros(N, dtype=np.uint8)
         u[info_idx] = msg
-        llr = awgn_llr(encode(u), snr_db, rng)
+        llr = awgn_llr(encode(u), snr_db, rng, rate=K / N)
         if decoder == "sc":
             uhat = sc_decode(llr, frozen)
         elif decoder == "scl":

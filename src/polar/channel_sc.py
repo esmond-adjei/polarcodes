@@ -1,18 +1,20 @@
 """Stage 1 — channel + Stage 2 — SC decoder (Arikan SC, LLR form).
 
-Convention: x = u @ G_N, G_N = B_N F^{⊗n}. Natural-order SC with
-contiguous minus(f)/plus(g) splits; bit-reversal lives in the code.
+Convention: x = u @ F^{⊗n} (butterfly encoder in core.py). Natural-order
+SC with contiguous minus(f)/plus(g) splits and partial-sum re-encoding.
 """
 import numpy as np
 
 
-def snr_to_sigma(snr_db: float) -> float:
-    return 10 ** (-snr_db / 20)
+def snr_to_sigma(snr_db: float, rate: float = 1.0) -> float:
+    """Eb/N0 (dB) -> AWGN std for unit-energy BPSK: sigma^2 = 1/(2*R*Eb/N0)."""
+    return float(np.sqrt(1.0 / (2 * rate * 10 ** (snr_db / 10))))
 
 
-def awgn_llr(x: np.ndarray, snr_db: float, rng: np.random.Generator) -> np.ndarray:
+def awgn_llr(x: np.ndarray, snr_db: float, rng: np.random.Generator,
+             rate: float = 1.0) -> np.ndarray:
     s = 1 - 2 * x.astype(float)
-    sigma = snr_to_sigma(snr_db)
+    sigma = snr_to_sigma(snr_db, rate)
     return 2 * (s + rng.normal(0, sigma, size=s.shape)) / sigma**2
 
 

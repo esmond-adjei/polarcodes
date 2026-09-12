@@ -83,7 +83,8 @@ def _phi_inv(y: float) -> float:
 
 def awgn_construction(N: int, K: int, design_snr_db: float = 0.0) -> np.ndarray:
     """Rank synthetic channels by GA mean LLR; freeze N-K worst."""
-    sigma = 10 ** (-design_snr_db / 20)  # BPSK, unit energy: sigma from Eb/N0-ish design SNR
+    from .channel_sc import snr_to_sigma
+    sigma = snr_to_sigma(design_snr_db, rate=K / N)
     m = np.full(N, 2.0 / sigma**2)
     step, n = 1, int(np.log2(N))
     for _ in range(n):
