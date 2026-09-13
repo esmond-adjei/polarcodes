@@ -13,7 +13,7 @@ matters for polar codes, and a concrete example.
 | BPSK | Binary phase-shift keying with unit energy: bit $0 \mapsto +1$, bit $1 \mapsto -1$, i.e. $s = 1 - 2x$. The decoder receives $y = s + n$ where $n \sim \mathcal{N}(0, \sigma^2)$. No other modulation is used here. |
 | AWGN | Additive white Gaussian noise channel: each received sample is $y = s + n$ with $n$ independent Gaussian noise of standard deviation $\sigma$. The channel is memoryless and symmetric; its LLR has the closed form $L = 2y/\sigma^2$. |
 | $E_b/N_0$ | Energy per information bit over noise spectral density, expressed in dB. The $x$-axis of every BER/FER plot. Related to the per-symbol SNR by $E_b/N_0 = E_s/N_0 / R$, so confusing the two shifts curves by $10 \log_{10}(R)$ (about $-3$ dB at $R=1/2$). |
-| LLR | Log-likelihood ratio $L = \log(P(y \mid 0)/P(y \mid 1))$. Sign decides the bit ($\ge 0$ favors $0$), magnitude measures confidence ($|L|=10$ is far more certain than $|L|=0.5$). For BPSK/AWGN, $L = 2y/\sigma^2$ exactly; all decoders consume LLRs, never raw $y$. |
+| LLR | Log-likelihood ratio $L = \log(P(y \mid 0)/P(y \mid 1))$. Sign decides the bit ($\ge 0$ favors $0$), magnitude measures confidence ($\|L\|=10$ is far more certain than $\|L\|=0.5$). For BPSK/AWGN, $L = 2y/\sigma^2$ exactly; all decoders consume LLRs, never raw $y$. |
 | Design SNR | The $E_b/N_0$ value that the AWGN construction assumes when ranking synthetic channels. A set designed at $0$ dB puts info on channels reliable at low SNR; a set designed at $3$ dB trusts channels that only become reliable at higher SNR. Best practice is to match design SNR to the operating SNR. |
 
 ## Polarization and construction
