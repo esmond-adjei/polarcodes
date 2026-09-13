@@ -7,11 +7,11 @@ can read the theory and the code side by side.
 
 ## What this replicates
 
-Tal-Vardy showed that keeping L candidate paths through the successive
+Tal-Vardy showed that keeping $L$ candidate paths through the successive
 cancellation decoder, instead of one, closes most of the gap between SC
-decoding and maximum-likelihood decoding. Their headline result: at N=2048,
-R=1/2, an SCL decoder with L=32 plus a 16-bit CRC performs close to ML. This
-repo reproduces that shape of result (BER/FER vs Eb/N0 curves for SC, SCL,
+decoding and maximum-likelihood decoding. Their headline result: at $N=2048$,
+$R=1/2$, an SCL decoder with $L=32$ plus a 16-bit CRC performs close to ML. This
+repo reproduces that shape of result (BER/FER vs $E_b/N_0$ curves for SC, SCL,
 and CA-SCL) at sizes that run in reasonable time in pure Python.
 
 ## Repo layout
@@ -40,28 +40,28 @@ uv sync
 uv run pytest tests/ -q
 ```
 
-A fast smoke run (N=128, L=4, about a minute):
+A fast smoke run ($N=128$, $L=4$, about a minute):
 
 ```bash
 uv run python scripts/replicate_tal_vardy.py --N 128 --K 64 \
     --snrs 1.0 2.0 3.0 --blocks 50 --L 4 --out results/curve128.png
 ```
 
-A paper-scale run (N=1024+, L=32) uses the same flags. It is slow in pure
-Python, so scale N, L, and --blocks gradually.
+A paper-scale run ($N=1024+$, $L=32$) uses the same flags. It is slow in pure
+Python, so scale $N$, $L$, and --blocks gradually.
 
 ## SNR convention
 
-Every SNR in this repo means Eb/N0 in dB for unit-energy BPSK. The noise
-standard deviation follows sigma^2 = 1/(2*R*Eb/N0), and channel LLRs are
-L = 2y/sigma^2. `tests/test_channel.py` pins this down by checking uncoded
-BPSK against Q(sqrt(2*Eb/N0)): at 0 dB the measured BER is 0.0786, matching
-theory. Before this calibration the code used sigma = 10^(-snr/20), which
-coincides at R=1/2 but mislabels every other rate by 10*log10(2R) dB.
+Every SNR in this repo means $E_b/N_0$ in dB for unit-energy BPSK. The noise
+standard deviation follows $\sigma^2 = 1/(2 \cdot R \cdot E_b/N_0)$, and channel LLRs are
+$L = 2y/\sigma^2$. `tests/test_channel.py` pins this down by checking uncoded
+BPSK against $Q(\sqrt{2 \cdot E_b/N_0})$: at 0 dB the measured BER is 0.0786, matching
+theory. Before this calibration the code used $\sigma = 10^{-\mathrm{snr}/20}$, which
+coincides at $R=1/2$ but mislabels every other rate by $10 \log_{10}(2R)$ dB.
 
 ## How the decoders compare
 
-At N=128, R=1/2 (50 blocks per point, GA construction at 1 dB design SNR):
+At $N=128$, $R=1/2$ (50 blocks per point, GA construction at 1 dB design SNR):
 
 | Eb/N0 | SC BER | SCL-4 BER | CA-SCL-4 BER |
 |-------|--------|-----------|--------------|
@@ -71,8 +71,8 @@ At N=128, R=1/2 (50 blocks per point, GA construction at 1 dB design SNR):
 
 Two things to notice. List decoding roughly halves the error rate over SC at
 each point, which is the paper's effect. And CA-SCL trails plain SCL here,
-because the 16 CRC bits consume info positions at fixed K, so the comparison
-is not rate-matched. At N=2048 the CRC gain dominates and the ordering flips
+because the 16 CRC bits consume info positions at fixed $K$, so the comparison
+is not rate-matched. At $N=2048$ the CRC gain dominates and the ordering flips
 to match the paper. That crossover with block length is itself a result worth
 reproducing.
 
@@ -82,20 +82,20 @@ reproducing.
 |---|---|
 | SC main loop (Alg 1/2/5) | `sc_decode` in `channel_sc.py` |
 | SCL main loop (Alg 16) | `scl_decode` in `scl.py` |
-| continuePaths frozen/unfrozen (Alg 17/18) | fork, rank, prune to L in `scl_decode` |
+| continuePaths frozen/unfrozen (Alg 17/18) | fork, rank, prune to $L$ in `scl_decode` |
 | findMostProbablePath (Alg 19) | best-first ordering of returned paths |
 | GA construction (Tal-Vardy 2013) | `awgn_construction` in `core.py` |
 
 Deliberate simplifications, documented in `docs/method.md`: LLR and path
 metrics replace the paper's likelihood domain, paths are full-vector copies
-instead of the lazy-copy structure of Algs 8-13 (so SCL costs O(L*n^2), not
-O(L*n log n)), and final CRC selection follows Niu-Chen rather than Tal-Vardy.
+instead of the lazy-copy structure of Algs 8-13 (so SCL costs $O(L \cdot n^2)$, not
+$O(L \cdot n \log n)$), and final CRC selection follows Niu-Chen rather than Tal-Vardy.
 Terms from the papers and the code are defined in `GLOSSARY.md`.
 
 ## Key implementation detail
 
-The SC `g`-step needs partial sums, the re-encoded upper-half decisions, not
-the raw decisions. Using raw decisions decodes N=4 correctly and fails
-silently at larger N. `channel_sc.py` computes them with a half-size butterfly
+The SC $g$-step needs partial sums, the re-encoded upper-half decisions, not
+the raw decisions. Using raw decisions decodes $N=4$ correctly and fails
+silently at larger $N$. `channel_sc.py` computes them with a half-size butterfly
 (`_partial_sums`), and `sc_llr` shares the same path so SCL stays consistent.
-This was caught by noiseless round-trip tests, which now cover N=16/64/256.
+This was caught by noiseless round-trip tests, which now cover $N=16/64/256$.
