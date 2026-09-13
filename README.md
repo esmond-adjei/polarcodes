@@ -1,101 +1,103 @@
 # Polar codes: SC, SCL, and CRC-aided SCL
 
-A readable Python replication of Tal and Vardy, "List Decoding of Polar
-Codes" (2012/2015), built on Arikan's polarization (2009) and the Tal-Vardy
-AWGN construction (2013). Each stage of the paper maps to one module, so you
-can read the theory and the code side by side.
+A reproducible Python reference implementation of Tal--Vardy successive-cancellation list decoding, with exact LLR updates, stable path metrics, CRC-aided selection, systematic encoding, and channel-dependent construction experiments.
 
-## What this replicates
+## Reproduction target
 
-Tal-Vardy showed that keeping $L$ candidate paths through the successive
-cancellation decoder, instead of one, closes most of the gap between SC
-decoding and maximum-likelihood decoding. Their headline result: at $N=2048$,
-$R=1/2$, an SCL decoder with $L=32$ plus a 16-bit CRC performs close to ML. This
-repo reproduces that shape of result (BER/FER vs $E_b/N_0$ curves for SC, SCL,
-and CA-SCL) at sizes that run in reasonable time in pure Python.
+The main target is Tal & Vardy, *List Decoding of Polar Codes*:
 
-## Repo layout
+- BPSK over BI-AWGN
+- `N = 2048`
+- effective information rate `R = 1/2`
+- design `Eb/N0 = 2 dB`
+- list sizes `L = 1, 2, 4, 8, 16, 32`
+- word-error-rate curves
 
-```
+The paper's CRC experiment uses 1040 unfrozen positions: the first 1024 carry payload and the last 16 carry CRC. Thus the effective information rate remains `1024/2048 = 1/2`.
+
+The paper states that its code construction was performed using Tal & Vardy's channel-construction method. This repository provides `tv-mc`, a deterministic Monte-Carlo density-evolution approximation to that construction, plus a faster Gaussian-approximation constructor for comparison. The exact internal frozen-set sequence used for the published simulations is not provided by the paper, so bit-for-bit curve identity cannot be claimed without recovering that sequence or the authors' original simulation implementation.
+
+## Layout
+
+```text
 src/polar/
-  core.py        polar transform, frozen-set construction (BEC + AWGN/GA)
-  channel_sc.py  BPSK/AWGN channel LLRs, SC decoder, per-bit SC LLR helper
-  scl.py         list decoder and CRC-aided variant
-  crc.py         CRC-16-CCITT attach/check
-  sim.py         BER/FER Monte Carlo harness
+  core.py          polar transform + Gaussian-approximation construction
+  construction.py  Monte-Carlo density-evolution construction (TV-MC)
+  channel_sc.py    BPSK/AWGN channel + SC primitives
+  scl.py           SCL + CRC-aided SCL
+  crc.py           CRC-16-CCITT
+  systematic.py    systematic polar encoder
+  sim.py           Monte-Carlo simulation + empirical ML lower bound
 scripts/
-  replicate_tal_vardy.py   paper-style curves (BER/FER vs Eb/N0)
-tests/
-  test_basic.py    encode properties, noiseless round-trip
-  test_channel.py  Eb/N0 calibration vs Q-function theory
-docs/
-  method.md      theory-to-code map, conventions, known limits
-  *.pdf          the four source papers
+  replicate_tal_vardy.py
+ tests/
+  test_basic.py
+  test_channel.py
+  test_reproduction.py
+ docs/
+  reproduction.md
+  method.md
+  tutorial.md
+  source papers
 ```
 
-## Setup and quick start
+## Setup
 
 ```bash
 uv sync
-uv run pytest tests/ -q
+uv run pytest -q
 ```
 
-A fast smoke run ($N=128$, $L=4$, about a minute):
+## Paper-scale run
+
+CPU-intensive in pure Python:
 
 ```bash
-uv run python scripts/replicate_tal_vardy.py --N 128 --K 64 \
-    --snrs 1.0 2.0 3.0 --blocks 50 --L 4 --out results/curve128.png
+uv run python scripts/replicate_tal_vardy.py \
+  --N 2048 --K 1024 \
+  --design-snr 2 \
+  --snrs 1 1.5 2 2.5 3 \
+  --blocks 10000 \
+  --L 1 2 4 8 16 32 \
+  --construction tv-mc \
+  --crc
 ```
 
-A paper-scale run ($N=1024+$, $L=32$) uses the same flags. It is slow in pure
-Python, so scale $N$, $L$, and --blocks gradually.
+For the paper's empirical ML lower bound:
+
+```bash
+uv run python scripts/replicate_tal_vardy.py \
+  --N 2048 --K 1024 --design-snr 2 \
+  --blocks 10000 --ml-bound
+```
+
+`10,000` blocks is only a starting point. At FER around `1e-5`, substantially more blocks are required to estimate the tail reliably. Increase the simulation budget or use an error-event stopping rule for publication-quality curves.
+
+## What was fixed
+
+- Exact LLR box-plus instead of min-sum.
+- Stable path-metric updates using `logaddexp`.
+- Explicit effective-rate handling for CRC experiments.
+- Tal--Vardy-style CRC placement: 16 CRC bits in the final 16 unfrozen positions.
+- CRC-aware final list selection with best-path fallback.
+- Systematic polar encoding.
+- Empirical ML lower-bound estimator matching the paper's procedure.
+- Deterministic channel construction with an explicit construction seed and sample budget.
+- Tests for exact LLR updates, CRC, systematic encoding, encoder/decoder behavior, and AWGN calibration.
+
+## Important reproduction caveat
+
+`tv-mc` is a numerical approximation of Tal--Vardy density evolution, not a claim that it reproduces the authors' internal quantized-channel construction bit-for-bit. The paper does not publish the exact frozen-set sequence used for Figure 1. For a strict forensic reproduction, recover the original frozen set or original implementation and feed it into the decoder unchanged.
+
+The decoder is also a reference implementation, not a timing reproduction of the paper's optimized lazy-copy implementation. It explicitly copies path vectors, so `N=2048, L=32` simulations are considerably slower than the paper's implementation.
 
 ## SNR convention
 
-Every SNR in this repo means $E_b/N_0$ in dB for unit-energy BPSK. The noise
-standard deviation follows $\sigma^2 = 1/(2 \cdot R \cdot E_b/N_0)$, and channel LLRs are
-$L = 2y/\sigma^2$. `tests/test_channel.py` pins this down by checking uncoded
-BPSK against $Q(\sqrt{2 \cdot E_b/N_0})$: at 0 dB the measured BER is 0.0786, matching
-theory. Before this calibration the code used $\sigma = 10^{-\mathrm{snr}/20}$, which
-coincides at $R=1/2$ but mislabels every other rate by $10 \log_{10}(2R)$ dB.
+All SNR values are `Eb/N0` in dB for unit-energy BPSK:
 
-## How the decoders compare
+```text
+sigma^2 = 1 / (2 R Eb/N0)
+LLR     = 2 y / sigma^2
+```
 
-At $N=128$, $R=1/2$ (50 blocks per point, GA construction at 1 dB design SNR):
-
-| Eb/N0 | SC BER | SCL-4 BER | CA-SCL-4 BER |
-|-------|--------|-----------|--------------|
-| 1 dB  | 0.39   | 0.31      | 0.33         |
-| 2 dB  | 0.37   | 0.21      | 0.24         |
-| 3 dB  | 0.26   | 0.11      | 0.14         |
-
-Two things to notice. List decoding roughly halves the error rate over SC at
-each point, which is the paper's effect. And CA-SCL trails plain SCL here,
-because the 16 CRC bits consume info positions at fixed $K$, so the comparison
-is not rate-matched. At $N=2048$ the CRC gain dominates and the ordering flips
-to match the paper. That crossover with block length is itself a result worth
-reproducing.
-
-## Paper-to-code map
-
-| Paper algorithm | Code |
-|---|---|
-| SC main loop (Alg 1/2/5) | `sc_decode` in `channel_sc.py` |
-| SCL main loop (Alg 16) | `scl_decode` in `scl.py` |
-| continuePaths frozen/unfrozen (Alg 17/18) | fork, rank, prune to $L$ in `scl_decode` |
-| findMostProbablePath (Alg 19) | best-first ordering of returned paths |
-| GA construction (Tal-Vardy 2013) | `awgn_construction` in `core.py` |
-
-Deliberate simplifications, documented in `docs/method.md`: LLR and path
-metrics replace the paper's likelihood domain, paths are full-vector copies
-instead of the lazy-copy structure of Algs 8-13 (so SCL costs $O(L \cdot n^2)$, not
-$O(L \cdot n \log n)$), and final CRC selection follows Niu-Chen rather than Tal-Vardy.
-Terms from the papers and the code are defined in `GLOSSARY.md`.
-
-## Key implementation detail
-
-The SC $g$-step needs partial sums, the re-encoded upper-half decisions, not
-the raw decisions. Using raw decisions decodes $N=4$ correctly and fails
-silently at larger $N$. `channel_sc.py` computes them with a half-size butterfly
-(`_partial_sums`), and `sc_llr` shares the same path so SCL stays consistent.
-This was caught by noiseless round-trip tests, which now cover $N=16/64/256$.
+For the CRC experiment, `R` is the **payload rate**, `1024/2048 = 1/2`, not the inner polar dimension `1040/2048`.
