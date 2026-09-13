@@ -22,6 +22,15 @@ BEC construction (`frozen_set_bec`) runs the exact Bhattacharyya recursion
 $Z^- = 2Z - Z^2$, $Z^+ = Z^2$ from $Z = \epsilon$ and freezes the $N-K$ worst channels.
 This is exact for the erasure channel and a good default everywhere.
 
+Stage order is load-bearing: both recursions run coarsest-split-first
+(step $N/2$ down to $1$), the same order SC traverses the tree
+(root first). Finest-first is a silent bit-reversal of the reliability
+ranking — endpoints agree, but interior $({-}{+}$ vs ${+}{-})$-type pairs
+swap, truly-awful early channels stay unfrozen, and SC pins at FER near 1
+even at high SNR. The `tv-mc` constructor splits root-first by construction,
+so cross-checking BEC/GA sets against it (overlap should exceed ~90% at
+matched design) catches ordering regressions; `test_scl.py` locks this in.
+
 AWGN construction (`awgn_construction`) follows the Gaussian approximation
 of Tal-Vardy 2013 (and Chung-Richardson-Urbanke): track the mean LLR $m$ of
 each synthetic channel from $m_0 = 2/\sigma^2$, with upper update
@@ -38,15 +47,15 @@ place to tighten.
 
 ## SC decoding
 
-`sc_decode` recurses on contiguous minus/plus splits. Even positions of a
-segment go through $f(a,b) = \mathrm{sign}(a) \mathrm{sign}(b) \min(|a|,|b|)$, the min-sum check
-node; odd positions go through $g(a,b,u) = b + (1-2u)a$, the variable node
-conditioned on the upper decision.
+`sc_decode` recurses on contiguous minus/plus splits. Upper-branch LLRs go
+through the exact box-plus $f(a,b)=\log((1+e^{a+b})/(e^{a}+e^{b}))$ via
+`logaddexp`; lower-branch LLRs go through $g(a,b,u) = b + (1-2u)a$, the
+variable node conditioned on the upper decision.
 
 The subtle part is what "upper decision" means in $g$. It is not the raw
 decoded bit. It is the partial sum: the upper-half decisions re-encoded
-through a half-size butterfly. `_partial_sums` does this, and `sc_llr`
-(the per-bit LLR used by SCL) shares the same path. Getting this wrong
+through a half-size butterfly. `_partial_sums` does this, and the SCL
+recursion shares the same rule via batched partial sums. Getting this wrong
 still decodes $N=4$ correctly and fails silently above it, which is why the
 noiseless round-trip test covers several block lengths.
 
@@ -56,9 +65,14 @@ noiseless round-trip test covers several block lengths.
 every surviving path in two; each frozen bit extends them in one. Path
 metrics update by $\log(1 + \exp(-(1-2u)L))$ and only the $L$ best forks survive.
 Candidates come back best-first, which is the Alg 19 selection. The
-complexity is $O(L \cdot n^2)$ because paths hold full decision vectors and LLRs
-are recomputed per bit; the paper's $O(L \cdot n \log n)$ comes from the lazy-copy
-path sharing of Algs 8-13, which this repo skips for readability.
+implementation recurses over contiguous segments and vectorizes $f$/$g$
+over paths and segment positions in NumPy, giving $O(L \cdot N \log N)$ LLR
+work (plus explicit $O(L \cdot N)$ path-vector copies in C on forks). It is
+bit-identical to the old per-bit `sc_llr` reference loop (same exact
+box-plus, same fork order, same stable-sort tie-breaking); the paper's
+further $O(L \cdot N \log N)$ lazy-copy path sharing of Algs 8-13 is traded
+for readability since NumPy copies are already fast enough (~0.04 s/block
+at N=2048, L=32).
 
 ## CRC-aided selection
 
@@ -79,10 +93,12 @@ is noise.
 
 ## Known limits
 
-- Pure Python recursion: $N=1024$ with $L=32$ runs but slowly. Vectorizing the
-  $f$/$g$ steps over paths is the obvious speedup.
-- Min-sum $f$ instead of exact boxplus: small loss vs the paper's likelihood
-  computations, standard in practice.
-- No puncturing/shortening, no systematic encoding, no 5G NR sequence.
-  The 3GPP reliability sequence would be a good cross-check for
-  `awgn_construction` orderings.
+- No puncturing/shortening, no 5G NR sequence. The 3GPP reliability
+  sequence would be a good cross-check for `awgn_construction` orderings.
+- `tv-mc` is Monte-Carlo density evolution, not the paper's quantized
+  channel construction bit-for-bit. The CLI defaults to 4096 samples
+  (~64 MB at N=2048); raising samples tightens the frozen set at O(N·samples)
+  memory cost.
+- `systematic_encode` caches its GF(2) inverse per `(N, info_idx)`, so
+  repeated encodes are O(K²) matvecs; the first call still pays the
+  O(K³)-ish elimination.

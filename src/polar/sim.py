@@ -1,7 +1,7 @@
 """Monte-Carlo simulation harness for SC/SCL/CA-SCL."""
 import numpy as np
 from .core import encode
-from .channel_sc import awgn_llr, sc_decode, sc_llr
+from .channel_sc import awgn_llr, sc_decode
 from .scl import scl_decode, ca_scl_decode
 from .crc import append_crc
 
@@ -65,7 +65,7 @@ def run_ml_bound_point(N, K, frozen, snr_db, n_blocks=10000, L=32,
     decoded likelihood > transmitted likelihood. This is the lower-bound
     construction described below Fig. 1 of the paper.
     """
-    from .scl import scl_decode, _update_pm
+    from .scl import _scl_decode_with_pm, path_metric
     rng = np.random.default_rng(seed)
     info_idx = np.where(~frozen)[0]
     if payload_len is None:
@@ -83,21 +83,15 @@ def run_ml_bound_point(N, K, frozen, snr_db, n_blocks=10000, L=32,
         u = np.zeros(N, dtype=np.uint8)
         u[info_idx] = info
         llr = awgn_llr(encode(u), snr_db, rng, rate=rate)
-        cand = scl_decode(llr, frozen, L)[0]
+        cands, pms = _scl_decode_with_pm(llr, frozen, L)
+        cand = cands[0]
         if not np.array_equal(cand[info_idx][:payload_len], msg):
             failures += 1
-            # Reconstruct the two accumulated negative log-likelihoods.
-            pm_c = pm_t = 0.0
-            uc = np.zeros(N, dtype=np.uint8)
-            for i in range(N):
-                Lc = sc_llr(llr, uc, i)
-                pm_c = _update_pm(pm_c, float(Lc), int(cand[i]))
-                uc[i] = cand[i]
-            ut = np.zeros(N, dtype=np.uint8)
-            for i in range(N):
-                Lt = sc_llr(llr, ut, i)
-                pm_t = _update_pm(pm_t, float(Lt), int(u[i]))
-                ut[i] = u[i]
+            # Candidate PM comes straight from the list decoder (same
+            # logaddexp accumulation); only the transmitted path needs a
+            # single O(N log N) SC pass instead of N O(N) sc_llr calls.
+            pm_c = float(pms[0])
+            pm_t = path_metric(llr, u)
             if pm_c < pm_t:
                 events += 1
     return events / n_blocks, failures / n_blocks, n_blocks

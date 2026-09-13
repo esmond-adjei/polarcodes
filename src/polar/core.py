@@ -59,11 +59,18 @@ def frozen_set_bec(N: int, K: int, eps: float = 0.5) -> np.ndarray:
     freezes the N-K positions with the largest Z, i.e. the least
     reliable synthetic channels. Exact for the BEC; a solid default
     elsewhere. Returns a boolean mask, True = frozen to 0.
+
+    Stage order matters: the recursion runs from the coarsest split
+    (step N/2, the decoder's root) down to the finest (step 1), matching
+    the SC traversal order and the tv-mc constructor. Running it
+    finest-first silently bit-reverses the reliability ranking, which
+    leaves truly-awful early channels unfrozen and collapses SC/SCL
+    (FER ~1 even at high SNR).
     """
     n = int(np.log2(N))
     z = np.full(N, eps)
-    step = 1
-    for _ in range(n):
+    step = N // 2
+    while step >= 1:
         nxt = np.empty(N)
         for i in range(0, N, 2 * step):
             for j in range(step):
@@ -71,7 +78,7 @@ def frozen_set_bec(N: int, K: int, eps: float = 0.5) -> np.ndarray:
                 nxt[i + j] = 2 * a - a * a
                 nxt[i + j + step] = a * a
         z = nxt
-        step *= 2
+        step //= 2
     frozen = np.ones(N, dtype=bool)
     frozen[np.argsort(z)[:K]] = False
     return frozen
@@ -123,11 +130,14 @@ def awgn_construction(N: int, K: int, design_snr_db: float = 0.0) -> np.ndarray:
     Use a design SNR near the operating point: too low wastes good
     channels, too high trusts channels that will fail. Returns a boolean
     mask, True = frozen to 0.
+
+    As in frozen_set_bec, stages run coarsest-first (step N/2 down to 1)
+    to match SC traversal order; finest-first would bit-reverse the ranking.
     """
     from .channel_sc import snr_to_sigma
     sigma = snr_to_sigma(design_snr_db, rate=K / N)
     m = np.full(N, 2.0 / sigma**2)
-    step, n = 1, int(np.log2(N))
+    step, n = N // 2, int(np.log2(N))
     for _ in range(n):
         nxt = np.empty(N)
         for i in range(0, N, 2 * step):
@@ -136,7 +146,7 @@ def awgn_construction(N: int, K: int, design_snr_db: float = 0.0) -> np.ndarray:
                 nxt[i + j] = _phi_inv(1 - (1 - _phi(a)) ** 2)
                 nxt[i + j + step] = 2 * a
         m = nxt
-        step *= 2
+        step //= 2
     frozen = np.ones(N, dtype=bool)
     frozen[np.argsort(m)[-K:]] = False
     return frozen

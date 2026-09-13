@@ -35,7 +35,9 @@ for fast comparison.
 - CRC filtering only at final selection
 - fallback to the best path when no candidate passes CRC
 - explicit distinction between inner unfrozen dimension `K` and payload rate
-- systematic encoder included for the paper's systematic experiment
+- systematic encoder module (`systematic.py`) with cached GF(2) solve;
+  no dedicated systematic-encoding FER script is shipped, so the paper's
+  systematic experiment is supported at the module level only
 
 ## Monte Carlo
 

@@ -115,11 +115,12 @@ $Z \in [0,1]$ where $0$ is perfect. Start $Z=\epsilon$. Each stage:
 $$Z^- = 2Z - Z^2 \quad \text{(upper, worse)}$$
 $$Z^+ = Z^2 \quad \text{(lower, better)}$$
 
-For $N=4$, $\epsilon=0.5$:
+For $N=4$, $\epsilon=0.5$ (stages run coarsest-split first, matching SC
+traversal — finest-first would bit-reverse the ranking, see `core.py`):
 
-* level 0: $[0.5]$
-* level 1: $[0.75,\; 0.25]$
-* level 2: $[0.9375,\; 0.5625,\; 0.4375,\; 0.0625]$
+* start: $[0.5, 0.5, 0.5, 0.5]$
+* after step 2: $[0.75,\; 0.75,\; 0.25,\; 0.25]$
+* after step 1: $[0.9375,\; 0.5625,\; 0.4375,\; 0.0625]$
 
 Sorted good-to-bad: $i=3,2,1,0$. With $K=2$, `frozen=[True,True,False,False]`. `fig03_frozen_pattern.png` draws these bars for $N=64`.
 
@@ -141,7 +142,7 @@ SC decides $u_0$, then $u_1$ given $u_0$, up to $u_{N-1}$. Two updates power eac
 
 ```mermaid
 flowchart TD
-    LC["segment LLRs lc[0..m-1]"] --> F["f(a,b)=sign(a)sign(b)min(|a|,|b|)<br/>LLR of u_0⊕u_1"]
+    LC["segment LLRs lc[0..m-1]"] --> F["f(a,b)=log((1+e^{a+b})/(e^{a}+e^{b}))<br/>LLR of u_0⊕u_1, exact box-plus"]
     F --> U0["decode upper half → u_0"]
     U0 --> PS["_partial_sums(u_0)<br/>re-encode half butterfly"]
     PS --> G["g(a,b,u)=b+(1-2u)a<br/>LLR of lower bit given u"]
@@ -149,14 +150,14 @@ flowchart TD
     U0 & U1 --> RET["return [u_0, u_1]"]
 ```
 
-* $f$ in `channel_sc.py:28 f`: the XOR. Confident only if both inputs are confident and agree. Min-sum drops the exact $\log(1+\cdot)$ correction at tiny loss.
+* $f$ in `channel_sc.py:28 f`: the XOR. Exact box-plus via `logaddexp`, not the min-sum approximation.
 * $g$ in `channel_sc.py:40 g`: the lower bit. If the upper bit $u=0$, observations add ($b+a$). If $u=1$, they subtract ($b-a$).
 
 The subtlety is `channel_sc.py:51 _partial_sums`. The $u$ in $g$ is not the raw decoded bit. It is that bit re-encoded through the half-size butterfly — the same code as `encode`. For $N=4$, the top decision must be XORed before it conditions the bottom. Using raw bits still passes $N=4$ and fails silently at $N=16$. The comment `decisions (NOT partial codeword)` in `channel_sc.py:84` exists for that reason.
 
-`channel_sc.py:87 sc_decode` recurses over contiguous halves. `channel_sc.py:101 sc_llr` walks only the single root-to-leaf path for bit $i$. Same arithmetic, no full decode.
+`channel_sc.py:87 sc_decode` recurses over contiguous halves. `channel_sc.py:101 sc_llr` walks only the single root-to-leaf path for bit $i$ (reference helper). The SCL decoder shares the same exact $f$/$g$ arithmetic through its own vectorized segment recursion.
 
-> **Related functions:** `channel_sc.py:28 f`, `channel_sc.py:40 g`, `channel_sc.py:51 _partial_sums`, `channel_sc.py:65 _decode_recursive`, `channel_sc.py:87 sc_decode`, `channel_sc.py:101 sc_llr` (shared by SCL per `scl.py:20`).
+> **Related functions:** `channel_sc.py:28 f`, `channel_sc.py:40 g`, `channel_sc.py:51 _partial_sums`, `channel_sc.py:65 _decode_recursive`, `channel_sc.py:87 sc_decode`, `scl.py:30 _boxplus_vec` / `scl.py:34 _encode_batch_inplace` (batched SCL versions).
 
 ---
 
@@ -175,9 +176,9 @@ flowchart TD
     PR --> S1["$L$ survivors to next bit"]
 ```
 
-Lower PM means more likely. Near $0$ when the guess matches $L$, near $|L|$ when it fights $L$. $L=1$ is SC. This version copies full vectors, so cost is $O(L\cdot n^2)$. The paper's Algs 8–13 share memory to reach $O(L\cdot n \log n)$ — traded here for readability per **principle-laziness-protocol**.
+Lower PM means more likely. Near $0$ when the guess matches $L$, near $|L|$ when it fights $L$. $L=1$ is SC. The implementation recurses over segments and vectorizes $f$/$g$ over paths in NumPy ($O(L\cdot N \log N)$), with explicit path-vector copies in C on forks — bit-identical to the per-bit reference loop, without the paper's lazy-copy sharing (Algs 8–13).
 
-> **Related functions:** `scl.py:10 _update_pm`, `scl.py:21 scl_decode` (fork-rank-prune loop, calls `channel_sc.py:101 sc_llr` per path per bit), `channel_sc.py:101 sc_llr` (LLR engine reused here).
+> **Related functions:** `scl.py:25 _update_pm`, `scl.py:120 scl_decode` (fork-rank-prune loop over vectorized segments), `scl.py:137 path_metric` (single-pass PM used by the ML bound).
 
 ---
 
@@ -200,7 +201,7 @@ With fixed $K$, those 16 bits eat data space, so at $N=128$ CA-SCL can trail pla
 from polar.core import awgn_construction
 from polar.sim import run_point
 frozen = awgn_construction(256, 128, design_snr_db=1.0)
-ber, fer = run_point(256, 128, frozen, snr_db=2.0, decoder="scl", L=8, n_blocks=80)
+ber, fer, _ = run_point(256, 128, frozen, snr_db=2.0, decoder="scl", L=8, n_blocks=80)
 ```
 
 `scripts/replicate_tal_vardy.py` loops that over $E_b/N_0$. `scripts/generate_figures.py` adds the visualization suite:
@@ -237,6 +238,6 @@ uv run python scripts/replicate_tal_vardy.py --N 1024 --K 512 --snrs 1.0 1.5 2.0
 * Trace $N=8$ by hand: encode a random $u$, compute $Z$ with $\epsilon=0.5$, mark frozen, walk SC with LLRs $[10,-10,-10,10,\dots]$.
 * Change `design_snr_db` from $1$ to $3$ and watch `fig04`'s overlap drop.
 * Fix $E_b/N_0=2$ dB and sweep $L=1,2,4,8,16,32$ with `fig07` — FER falls then flattens, which is the diminishing return Tal-Vardy reports.
-* Replace min-sum $f$ with exact boxplus $\log((1+e^{a+b})/(e^{a}+e^{b}))$ and measure the small FER gap.
+* Compare exact box-plus $f$ against the min-sum approximation $\mathrm{sign}(a)\mathrm{sign}(b)\min(|a|,|b|)$ and measure the small FER gap.
 
 Glossary for every term lives in `GLOSSARY.md`. Method notes with conventions and known limits are in `docs/method.md`.

@@ -24,7 +24,7 @@ def _boxplus(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def tv_mc_construction(N: int, K: int, design_snr_db: float = 2.0,
-                       samples: int = 200_000, seed: int = 12345) -> np.ndarray:
+                       samples: int = 16384, seed: int = 12345) -> np.ndarray:
     """Monte-Carlo density-evolution construction for BI-AWGN.
 
     The LLR distribution is conditioned on the all-zero transmitted bit.
@@ -38,6 +38,12 @@ def tv_mc_construction(N: int, K: int, design_snr_db: float = 2.0,
     This is an approximation to the Tal--Vardy construction, not a claim of
     bit-for-bit identity with their quantized implementation. Increase
     ``samples`` for tighter construction reproducibility.
+
+    Memory scales as O(N·sambles) float64 (the N final empirical
+    distributions are kept to rank channels): N=2048 with samples=16384 is
+    ~256 MB; samples=4096 (~64 MB) is the recommended routine budget and
+    the CLI default. The old 200_000 default needed several GB at N=2048
+    and is only feasible for small N.
     """
     if N < 1 or N & (N - 1):
         raise ValueError("N must be a power of two")
@@ -45,6 +51,11 @@ def tv_mc_construction(N: int, K: int, design_snr_db: float = 2.0,
         raise ValueError("K must satisfy 0 < K <= N")
     if samples < 1024:
         raise ValueError("samples should be >= 1024 for construction; 4096+ is recommended")
+    mem_gb = N * int(samples) * 8 / 1e9
+    if mem_gb > 1.0:
+        raise ValueError(
+            f"tv_mc_construction(N={N}, samples={samples}) needs ~{mem_gb:.1f} GB; "
+            "reduce samples (4096-16384 recommended at N=2048) or run at smaller N")
 
     rng = np.random.default_rng(seed)
     sigma = snr_to_sigma(design_snr_db, rate=K / N)

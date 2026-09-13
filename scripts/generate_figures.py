@@ -22,7 +22,7 @@ plt.switch_backend("Agg")
 def _bhattacharyya_vec(N: int, eps: float = 0.5) -> np.ndarray:
     n = int(np.log2(N))
     z = np.full(N, eps, dtype=float)
-    step = 1
+    step = N // 2  # coarsest-first to match SC traversal order (see core.frozen_set_bec)
     for _ in range(n):
         nxt = np.empty(N)
         for i in range(0, N, 2 * step):
@@ -31,7 +31,7 @@ def _bhattacharyya_vec(N: int, eps: float = 0.5) -> np.ndarray:
                 nxt[i + j] = 2 * a - a * a
                 nxt[i + j + step] = a * a
         z = nxt
-        step *= 2
+        step //= 2
     return z
 
 
@@ -42,7 +42,7 @@ def _ga_means(N: int, K: int, design_snr_db: float) -> np.ndarray:
 
     sigma = snr_to_sigma(design_snr_db, rate=K / N)
     m = np.full(N, 2.0 / sigma**2)
-    step = 1
+    step = N // 2  # coarsest-first to match SC traversal order (see core.awgn_construction)
     n = int(np.log2(N))
     for _ in range(n):
         nxt = np.empty(N)
@@ -52,7 +52,7 @@ def _ga_means(N: int, K: int, design_snr_db: float) -> np.ndarray:
                 nxt[i + j] = _phi_inv(1 - (1 - _phi(a)) ** 2)
                 nxt[i + j + step] = 2 * a
         m = nxt
-        step *= 2
+        step //= 2
     return m
 
 
@@ -217,9 +217,14 @@ def _run_curves(N: int, K: int, snrs: list[float], decoders: list[tuple[str, int
     frozen = awgn_construction(N, K, design_snr)
     results: dict[str, tuple[list[float], list[float]]] = {}
     for name, L, crc in decoders:
+        # Fixed-K comparison: CRC steals `crc` info positions, so CA-SCL
+        # payload is K - crc (see method note). Keeps one frozen set.
+        payload_len = K - crc if crc else K
         bers, fers = [], []
         for s in snrs:
-            b, f = run_point(N, K, frozen, s, decoder=name, L=L, n_blocks=blocks, crc_len=crc, seed=0)
+            b, f, _ = run_point(N, K, frozen, s, decoder=name, L=L,
+                                n_blocks=blocks, payload_len=payload_len,
+                                seed=0)
             bers.append(max(b, 1e-6))
             fers.append(max(f, 1e-6))
             print(f"  {name} L={L} SNR {s}: BER {b:.2e} FER {f:.2e}")
@@ -264,8 +269,11 @@ def fig_fer_vs_L(out: str, quick: bool = True):
     frozen = awgn_construction(N, K, 1.0)
     fers_scl, fers_ca = [], []
     for L in Ls:
-        _, f1 = run_point(N, K, frozen, snr, decoder="scl", L=L, n_blocks=blocks, seed=1)
-        _, f2 = run_point(N, K, frozen, snr, decoder="ca-scl", L=L, n_blocks=blocks, crc_len=16, seed=1)
+        _, f1, _ = run_point(N, K, frozen, snr, decoder="scl" if L > 1 else "sc",
+                             L=L, n_blocks=blocks, seed=1)
+        # Fixed-K: CRC-16 steals 16 info positions from the same frozen set.
+        _, f2, _ = run_point(N, K, frozen, snr, decoder="ca-scl", L=L,
+                             n_blocks=blocks, payload_len=K - 16, seed=1)
         fers_scl.append(max(f1, 5e-4))
         fers_ca.append(max(f2, 5e-4))
         print(f"  L={L}: SCL FER {f1:.3f}  CA-SCL FER {f2:.3f}")

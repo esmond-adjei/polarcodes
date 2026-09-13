@@ -50,25 +50,30 @@ uv run pytest -q
 
 ## Paper-scale run
 
-CPU-intensive in pure Python:
+Vectorized NumPy SCL (~0.02 s/block SC, ~0.04 s/block L=32 at N=2048;
+~7 min per 10,000-block point single-core at L=32, ~3-5 min at smaller L).
+The full 30-point sweep below is under an hour on an 8-core machine with
+the parallel script; use `--workers` to spread independent (decoder, L, SNR)
+points across cores:
 
 ```bash
-uv run python scripts/replicate_tal_vardy.py \
+uv run python scripts/replicate_tal_vardy_parallel.py \
   --N 2048 --K 1024 \
   --design-snr 2 \
   --snrs 1 1.5 2 2.5 3 \
   --blocks 10000 \
   --L 1 2 4 8 16 32 \
   --construction tv-mc \
-  --crc
+  --crc --ml-bound \
+  --workers 8
 ```
 
-For the paper's empirical ML lower bound:
+Start small to validate trends before committing compute (seconds to minutes):
 
 ```bash
-uv run python scripts/replicate_tal_vardy.py \
-  --N 2048 --K 1024 --design-snr 2 \
-  --blocks 10000 --ml-bound
+uv run python scripts/replicate_tal_vardy_parallel.py \
+  --N 256 --K 128 --design-snr 1 \
+  --snrs 1 2 3 --blocks 500 --L 1 2 4 8 --workers 4
 ```
 
 `10,000` blocks is only a starting point. At FER around `1e-5`, substantially more blocks are required to estimate the tail reliably. Increase the simulation budget or use an error-event stopping rule for publication-quality curves.
@@ -83,13 +88,13 @@ uv run python scripts/replicate_tal_vardy.py \
 - Systematic polar encoding.
 - Empirical ML lower-bound estimator matching the paper's procedure.
 - Deterministic channel construction with an explicit construction seed and sample budget.
-- Tests for exact LLR updates, CRC, systematic encoding, encoder/decoder behavior, and AWGN calibration.
+- Tests for exact LLR updates, CRC, systematic encoding, encoder/decoder behavior, AWGN calibration, plus SCL/CA-SCL list behavior (L=1 ≡ SC, PM monotonicity, CRC selection), tv-mc determinism, and sim-harness smoke coverage.
 
 ## Important reproduction caveat
 
 `tv-mc` is a numerical approximation of Tal--Vardy density evolution, not a claim that it reproduces the authors' internal quantized-channel construction bit-for-bit. The paper does not publish the exact frozen-set sequence used for Figure 1. For a strict forensic reproduction, recover the original frozen set or original implementation and feed it into the decoder unchanged.
 
-The decoder is also a reference implementation, not a timing reproduction of the paper's optimized lazy-copy implementation. It explicitly copies path vectors, so `N=2048, L=32` simulations are considerably slower than the paper's implementation.
+The decoder uses the exact LLR box-plus and stable path metrics with NumPy-vectorized segment recursion (bit-identical to the per-bit reference loop). It still copies path vectors explicitly rather than the paper's lazy-copy sharing, but copies run in C and paper-scale N=2048 sweeps are routine (see timings above).
 
 ## SNR convention
 
